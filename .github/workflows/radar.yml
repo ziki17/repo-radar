@@ -1,0 +1,70 @@
+name: Repo Radar
+
+on:
+  # Mondays 06:17 UTC (off :00/:30, which GitHub's scheduler drops most)
+  schedule:
+    - cron: '17 6 * * 1'
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no email, dashboard or seen.json update)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: repo-radar
+  cancel-in-progress: false
+
+# Needs write access to commit seen.json back
+permissions:
+  contents: write
+
+jobs:
+  radar:
+    # Scheduled runs only start once the repository variable RADAR_ENABLED is 'true', so a fresh
+    # copy without secrets does not fail every Monday. Manual runs always start.
+    if: github.event_name == 'workflow_dispatch' || vars.RADAR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Repo Radar
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          DASHBOARD_TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python radar.py
+          ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Commit updated state
+        if: success()
+        run: |
+          if [ -n "$(git status --porcelain seen.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add seen.json
+            git commit -m "chore: update repo radar state [skip ci]"
+            git pull --rebase
+            git push
+          else
+            echo "No state changes to commit."
+          fi

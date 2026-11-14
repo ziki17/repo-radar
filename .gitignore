@@ -1,0 +1,8 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+last_run.json
+.pytest_cache/
+.ruff_cache/
